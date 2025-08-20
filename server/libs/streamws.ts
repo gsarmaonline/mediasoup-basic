@@ -47,13 +47,21 @@ export class StreamWs {
       });
     };
 
-    const removeNode = (socket: string) => {
-      console.log("Producer removed", socket);
+    const removeNode = (socketId: string) => {
+      console.log("All objects removed for socket", socketId);
       // Notify all clients about the removed producer
-      const socketMap: SocketMap = socketStore.sockets[socket];
+      const socketMap: SocketMap = socketStore.sockets[socketId];
       io.emit("node-removed", {
         socketMap: socketMap,
       });
+      for (const producerId in socketMap.producers) {
+        delete producers[producerId];
+      }
+      for (const consumerId in socketMap.consumers) {
+        delete consumers[consumerId];
+      }
+      // Delete the socket entry from the hash
+      delete socketStore.sockets[socketId];
     };
 
     io.on("connection", (socket: Socket) => {
@@ -152,6 +160,13 @@ export class StreamWs {
         "transport-recv-connect",
         async ({ dtlsParameters, producerId }) => {
           console.log(`transport-recv-connect DTLS PARAMS: ${dtlsParameters}`);
+          if (recvTransports[producerId] !== undefined) {
+            console.log(
+              "dtls",
+              recvTransports[producerId].dtlsState,
+              producers[producerId]
+            );
+          }
           await recvTransports[producerId].connect({ dtlsParameters });
         }
       );

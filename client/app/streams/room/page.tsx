@@ -19,9 +19,9 @@ type RemoteParticipant = {
 };
 
 const Room = () => {
-  let socket: Socket;
+  const socketRef = useRef<Socket | null>(null);
+  const deviceRef = useRef<Device | null>(null);
 
-  let device: Device;
   let routerRtpCapabilities: RtpCapabilities;
 
   let sendTransport: mediasoupTypes.Transport;
@@ -59,6 +59,8 @@ const Room = () => {
     },
   };
 
+  console.log("Room component initialized");
+
   // Function to simulate adding a new participant with a stream
   const addRemoteVideoParticipant = (newParticipant: RemoteParticipant) => {
     setParticipants((prevParticipants) => {
@@ -85,10 +87,6 @@ const Room = () => {
 
   const getMedia = async () => {
     try {
-      console.log(
-        "device.rtpCapabilities.codecs",
-        device.rtpCapabilities.codecs
-      );
       const localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
@@ -107,8 +105,8 @@ const Room = () => {
     routerRtpCapabilities = await socket.emitWithAck(
       "getRouterRtpCapabilities"
     );
-    device = new Device();
-    await device.load({ routerRtpCapabilities });
+    deviceRef.current = new Device();
+    await deviceRef.current.load({ routerRtpCapabilities });
   };
 
   const getAvailableProducers = async (socket: Socket) => {
@@ -130,7 +128,11 @@ const Room = () => {
           console.log(params.error);
           return;
         }
-        sendTransport = device.createSendTransport(params);
+        if (deviceRef.current == null) {
+          console.error("Device is not initialized yet in createSendTransport");
+          return;
+        }
+        sendTransport = deviceRef.current.createSendTransport(params);
 
         sendTransport.on(
           "connect",
@@ -191,7 +193,13 @@ const Room = () => {
       "createWebRtcTransport",
       { producing: false, producerId },
       ({ params }: { params: any }) => {
-        const recvTransport = device.createRecvTransport(params);
+        if (deviceRef.current == null) {
+          console.error(
+            "Device is not initialized yet in createClientReceiver"
+          );
+          return;
+        }
+        const recvTransport = deviceRef.current.createRecvTransport(params);
         recvTransports.set(producerId, recvTransport);
 
         recvTransport.on(
@@ -219,10 +227,14 @@ const Room = () => {
     transport: mediasoupTypes.Transport,
     producerId: string
   ) => {
+    if (deviceRef.current == null) {
+      console.error("Device is not initialized yet in connectRecvTransport");
+      return;
+    }
     await socket.emit(
       "consume",
       {
-        rtpCapabilities: device.rtpCapabilities,
+        rtpCapabilities: deviceRef.current.rtpCapabilities,
         producerId: producerId,
         transportId: transport.id,
       },
@@ -248,9 +260,9 @@ const Room = () => {
     );
   };
 
-  const startStreaming = async () => {
+  const startStreaming = async (socket: Socket) => {
     if (socket == null) {
-      console.log("Socket is not initialized yet");
+      console.log("Socket is not initialized yet", socket);
       return;
     }
 
@@ -261,7 +273,15 @@ const Room = () => {
   };
 
   useEffect(() => {
-    socket = io("http://127.0.0.1:8080");
+    let socket: Socket;
+    if (socketRef.current) {
+      console.log("Socket already initialized");
+      socket = socketRef.current;
+      return;
+    } else {
+      socket = io("http://127.0.0.1:8080");
+      socketRef.current = socket;
+    }
 
     socket.on("connect", async () => {
       console.log("Connected to signaling server");
@@ -274,7 +294,7 @@ const Room = () => {
       setTimeout(() => {
         console.log("New producer:", producerId, producer);
         // If the producerId is different from the current producer, create a client receiver
-        if (producerId != producer.id) {
+        if (producer == null || producerId != producer.id) {
           createClientReceiver(socket, producerId);
         }
       }, 2000);
@@ -296,18 +316,18 @@ const Room = () => {
       <button
         type="button"
         className="mx-5 px-5 py-2.5 bg-gray-300 text-gray-800 rounded text-base hover:bg-gray-400 focus:outline-none"
-        onClick={() => startStreaming()}
+        onClick={() => startStreaming(socketRef.current as Socket)}
       >
         Start Streaming
       </button>
       <button
         type="button"
         className="mx-5 px-5 py-2.5 bg-gray-300 text-gray-800 rounded text-base hover:bg-gray-400 focus:outline-none"
-        onClick={() => createClientReceiver(socket as Socket, "")}
+        onClick={() => createClientReceiver(socketRef.current as Socket, "")}
       >
         Start watching
       </button>
-      {isProducer && (
+      {
         <video
           className="mx-5"
           width="40%"
@@ -315,7 +335,7 @@ const Room = () => {
           autoPlay
           muted
         />
-      )}
+      }
       {participants.map((participant) => (
         <div
           key={participant.id}
